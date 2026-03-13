@@ -12,11 +12,10 @@ from models import today
 
 # ─── SETUP ────────────────────────────────────────────────────────────────────
 
-# The name of the file where all data is stored
 DATA_FILE = "daykeep.json"
 
-# The structure of the data file — three separate lists, one per data type
 EMPTY_DATA = {
+    "user": {},
     "goals": [],
     "tasks": [],
     "journal": [],
@@ -26,8 +25,6 @@ EMPTY_DATA = {
 # ─── CORE STORAGE ─────────────────────────────────────────────────────────────
 
 def load_data():
-    # Reads the data file and returns everything in it.
-    # If the file doesn't exist yet, returns the empty structure.
     if not os.path.exists(DATA_FILE):
         return EMPTY_DATA.copy()
     with open(DATA_FILE, "r") as f:
@@ -35,7 +32,6 @@ def load_data():
 
 
 def save_data(data):
-    # Writes the full data dictionary back to the file.
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=2)
 
@@ -43,23 +39,40 @@ def save_data(data):
 # ─── ID HELPERS ───────────────────────────────────────────────────────────────
 
 def get_next_id(records):
-    # Takes a list of records and returns the next available ID.
-    # If the list is empty, starts at 1.
     if not records:
         return 1
     return max(record["id"] for record in records) + 1
 
 
+# ─── USER PROFILE ─────────────────────────────────────────────────────────────
+
+def get_user():
+    # Returns the user profile dictionary, or empty dict if not set up yet.
+    data = load_data()
+    return data.get("user", {})
+
+
+def save_user(profile):
+    # Saves the user profile.
+    data = load_data()
+    data["user"] = profile
+    save_data(data)
+
+
+def is_first_run():
+    # Returns True if no user profile exists yet.
+    user = get_user()
+    return not user or not user.get("name")
+
+
 # ─── GOALS ────────────────────────────────────────────────────────────────────
 
 def get_all_goals():
-    # Returns the full list of goals.
     data = load_data()
     return data["goals"]
 
 
 def get_goal_by_id(goal_id):
-    # Returns a single goal by its ID, or None if not found.
     goals = get_all_goals()
     for goal in goals:
         if goal["id"] == goal_id:
@@ -68,8 +81,6 @@ def get_goal_by_id(goal_id):
 
 
 def add_goal(goal):
-    # Assigns an ID to the goal and saves it.
-    # Returns the saved goal.
     data = load_data()
     goal["id"] = get_next_id(data["goals"])
     data["goals"].append(goal)
@@ -78,8 +89,6 @@ def add_goal(goal):
 
 
 def update_goal(goal_id, updated_fields):
-    # Finds the goal with the given ID and updates only the fields provided.
-    # Returns True if the goal was found and updated, False if not found.
     data = load_data()
     for i, goal in enumerate(data["goals"]):
         if goal["id"] == goal_id:
@@ -92,8 +101,6 @@ def update_goal(goal_id, updated_fields):
 
 
 def delete_goal(goal_id):
-    # Removes the goal with the given ID.
-    # Returns True if deleted, False if not found.
     data = load_data()
     original_count = len(data["goals"])
     data["goals"] = [g for g in data["goals"] if g["id"] != goal_id]
@@ -103,27 +110,68 @@ def delete_goal(goal_id):
     return False
 
 
+def update_goal_streak(goal_id):
+    # Called when a routine task linked to this goal is marked complete.
+    # If the last streak date was yesterday, increment streak.
+    # If it was today already, do nothing.
+    # If it was earlier or empty, reset streak to 1.
+    data = load_data()
+    today_str = today()
+    yesterday_str = (datetime.date.today() - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+
+    for i, goal in enumerate(data["goals"]):
+        if goal["id"] == goal_id:
+            last_date = goal.get("last_streak_date", "")
+            if last_date == today_str:
+                # Already updated today
+                return
+            elif last_date == yesterday_str:
+                # Continuing the streak
+                data["goals"][i]["streak"] = goal.get("streak", 0) + 1
+            else:
+                # Streak broken or starting fresh
+                data["goals"][i]["streak"] = 1
+            data["goals"][i]["last_streak_date"] = today_str
+            data["goals"][i]["last_updated"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            save_data(data)
+            return
+
+
+def get_goals_with_endangered_streaks():
+    # Returns goals whose streak is active but hasn't been updated today.
+    # These are the ones at risk of being broken if the user doesn't act.
+    goals = get_all_goals()
+    today_str = today()
+    yesterday_str = (datetime.date.today() - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+    endangered = []
+
+    for goal in goals:
+        streak = goal.get("streak", 0)
+        last_date = goal.get("last_streak_date", "")
+        # Only flag goals with an active streak that haven't been updated today
+        if streak > 0 and last_date == yesterday_str:
+            endangered.append(goal)
+
+    return endangered
+
+
 # ─── TASKS ────────────────────────────────────────────────────────────────────
 
 def get_all_tasks():
-    # Returns the full list of tasks.
     data = load_data()
     return data["tasks"]
 
 
 def get_tasks_for_date(date_string):
-    # Returns all tasks for a specific date (YYYY-MM-DD).
     tasks = get_all_tasks()
     return [t for t in tasks if t["date"] == date_string]
 
 
 def get_tasks_for_today():
-    # Returns all tasks for today.
     return get_tasks_for_date(today())
 
 
 def get_task_by_id(task_id):
-    # Returns a single task by its ID, or None if not found.
     tasks = get_all_tasks()
     for task in tasks:
         if task["id"] == task_id:
@@ -132,8 +180,6 @@ def get_task_by_id(task_id):
 
 
 def add_task(task):
-    # Assigns an ID to the task and saves it.
-    # Returns the saved task.
     data = load_data()
     task["id"] = get_next_id(data["tasks"])
     data["tasks"].append(task)
@@ -142,8 +188,6 @@ def add_task(task):
 
 
 def update_task(task_id, updated_fields):
-    # Finds the task with the given ID and updates only the fields provided.
-    # Returns True if found and updated, False if not found.
     data = load_data()
     for i, task in enumerate(data["tasks"]):
         if task["id"] == task_id:
@@ -156,8 +200,6 @@ def update_task(task_id, updated_fields):
 
 
 def delete_task(task_id):
-    # Removes the task with the given ID.
-    # Returns True if deleted, False if not found.
     data = load_data()
     original_count = len(data["tasks"])
     data["tasks"] = [t for t in data["tasks"] if t["id"] != task_id]
@@ -167,17 +209,91 @@ def delete_task(task_id):
     return False
 
 
+def add_note_to_task(task_id, note_text):
+    # Adds a new note to a task's notes list.
+    # Notes stack — they never overwrite each other.
+    data = load_data()
+    for i, task in enumerate(data["tasks"]):
+        if task["id"] == task_id:
+            if not isinstance(data["tasks"][i].get("notes"), list):
+                data["tasks"][i]["notes"] = []
+            data["tasks"][i]["notes"].append({
+                "text": note_text.strip(),
+                "added": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            })
+            data["tasks"][i]["last_updated"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            save_data(data)
+            return True
+    return False
+
+
+def delete_note_from_task(task_id, note_index):
+    # Deletes a specific note by its index in the notes list.
+    data = load_data()
+    for i, task in enumerate(data["tasks"]):
+        if task["id"] == task_id:
+            notes = data["tasks"][i].get("notes", [])
+            if 0 <= note_index < len(notes):
+                notes.pop(note_index)
+                data["tasks"][i]["notes"] = notes
+                data["tasks"][i]["last_updated"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                save_data(data)
+                return True
+    return False
+
+
+def postpone_task(task_id, new_date, new_time=""):
+    # Records a postpone event in the task's history and updates the date/time.
+    data = load_data()
+    for i, task in enumerate(data["tasks"]):
+        if task["id"] == task_id:
+            # Record the postpone event in history
+            postpone_event = {
+                "postponed_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "original_date": task["date"],
+                "original_time": task.get("scheduled_time", ""),
+                "new_date": new_date,
+                "new_time": new_time,
+            }
+            if not isinstance(data["tasks"][i].get("postpone_history"), list):
+                data["tasks"][i]["postpone_history"] = []
+            data["tasks"][i]["postpone_history"].append(postpone_event)
+
+            # Update the task to the new date/time
+            data["tasks"][i]["date"] = new_date
+            data["tasks"][i]["scheduled_time"] = new_time
+            data["tasks"][i]["status"] = "Planned"
+            data["tasks"][i]["last_updated"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            save_data(data)
+            return True
+    return False
+
+
+def check_and_flag_stale_tasks():
+    # Checks all tasks from previous days that are still on Planned status
+    # and updates them to Not Updated.
+    data = load_data()
+    today_str = today()
+    changed = False
+
+    for i, task in enumerate(data["tasks"]):
+        if task["status"] == "Planned" and task["date"] < today_str:
+            data["tasks"][i]["status"] = "Not Updated"
+            data["tasks"][i]["last_updated"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            changed = True
+
+    if changed:
+        save_data(data)
+
+
 # ─── JOURNAL ──────────────────────────────────────────────────────────────────
 
 def get_all_journal_entries():
-    # Returns the full list of journal entries.
     data = load_data()
     return data["journal"]
 
 
 def get_journal_entry_by_date(date_string):
-    # Returns the journal entry for a specific date, or None if none exists.
-    # Only one entry per day is allowed.
     entries = get_all_journal_entries()
     for entry in entries:
         if entry["date"] == date_string:
@@ -186,12 +302,10 @@ def get_journal_entry_by_date(date_string):
 
 
 def get_todays_journal_entry():
-    # Returns today's journal entry, or None if none exists yet.
     return get_journal_entry_by_date(today())
 
 
 def get_journal_entry_by_id(entry_id):
-    # Returns a single journal entry by its ID, or None if not found.
     entries = get_all_journal_entries()
     for entry in entries:
         if entry["id"] == entry_id:
@@ -200,8 +314,6 @@ def get_journal_entry_by_id(entry_id):
 
 
 def add_journal_entry(entry):
-    # Assigns an ID to the entry and saves it.
-    # Returns the saved entry.
     data = load_data()
     entry["id"] = get_next_id(data["journal"])
     data["journal"].append(entry)
@@ -210,8 +322,6 @@ def add_journal_entry(entry):
 
 
 def update_journal_entry(entry_id, updated_fields):
-    # Finds the entry with the given ID and updates only the fields provided.
-    # Returns True if found and updated, False if not found.
     data = load_data()
     for i, entry in enumerate(data["journal"]):
         if entry["id"] == entry_id:
@@ -224,8 +334,6 @@ def update_journal_entry(entry_id, updated_fields):
 
 
 def delete_journal_entry(entry_id):
-    # Removes the journal entry with the given ID.
-    # Returns True if deleted, False if not found.
     data = load_data()
     original_count = len(data["journal"])
     data["journal"] = [e for e in data["journal"] if e["id"] != entry_id]
@@ -238,9 +346,6 @@ def delete_journal_entry(entry_id):
 # ─── ACCOUNTABILITY HELPERS ───────────────────────────────────────────────────
 
 def get_completion_rate(date_string):
-    # Returns the completion rate for a specific day as a percentage.
-    # Only counts tasks that were Planned, Complete, Incomplete, or Skipped.
-    # Returns 0 if there are no tasks for that day.
     tasks = get_tasks_for_date(date_string)
     if not tasks:
         return 0
@@ -249,14 +354,14 @@ def get_completion_rate(date_string):
 
 
 def get_todays_summary():
-    # Returns a summary dictionary for today.
-    # Includes total tasks, completed, incomplete, skipped, and completion rate.
     tasks = get_tasks_for_today()
     total = len(tasks)
     completed = len([t for t in tasks if t["status"] == "Complete"])
     incomplete = len([t for t in tasks if t["status"] == "Incomplete"])
     skipped = len([t for t in tasks if t["status"] == "Skipped"])
     planned = len([t for t in tasks if t["status"] == "Planned"])
+    postponed = len([t for t in tasks if t["status"] == "Postponed"])
+    not_updated = len([t for t in tasks if t["status"] == "Not Updated"])
 
     return {
         "total": total,
@@ -264,19 +369,18 @@ def get_todays_summary():
         "incomplete": incomplete,
         "skipped": skipped,
         "planned": planned,
+        "postponed": postponed,
+        "not_updated": not_updated,
         "completion_rate": get_completion_rate(today()),
     }
 
 
 def get_routine_tasks():
-    # Returns all tasks marked as routines.
     tasks = get_all_tasks()
     return [t for t in tasks if t.get("is_routine") == True]
 
 
 def get_upcoming_tasks(hours=2):
-    # Returns tasks scheduled within the next X hours from now.
-    # Used for the startup time-aware summary.
     now = datetime.datetime.now()
     upcoming = []
     todays_tasks = get_tasks_for_today()
@@ -289,20 +393,16 @@ def get_upcoming_tasks(hours=2):
                 f"{today()} {task['scheduled_time']}", "%Y-%m-%d %H:%M"
             )
             minutes_until = (task_time - now).total_seconds() / 60
-            # Only include tasks that are coming up within the window and haven't passed
             if 0 <= minutes_until <= hours * 60:
                 upcoming.append((task, int(minutes_until)))
         except ValueError:
             continue
 
-    # Sort by soonest first
     upcoming.sort(key=lambda x: x[1])
     return upcoming
 
 
 def get_overdue_tasks():
-    # Returns tasks from today that had a scheduled time that has already passed
-    # and are still marked as Planned.
     now = datetime.datetime.now()
     overdue = []
     todays_tasks = get_tasks_for_today()
