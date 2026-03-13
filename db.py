@@ -278,7 +278,7 @@ def check_and_flag_stale_tasks():
 
     for i, task in enumerate(data["tasks"]):
         if task["status"] == "Planned" and task["date"] < today_str:
-            data["tasks"][i]["status"] = "Not Updated"
+            data["tasks"][i]["status"] = "Abandoned: needs update"
             data["tasks"][i]["last_updated"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             changed = True
 
