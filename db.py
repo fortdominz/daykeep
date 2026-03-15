@@ -327,7 +327,12 @@ def update_journal_entry(entry_id, updated_fields):
         if entry["id"] == entry_id:
             for field, value in updated_fields.items():
                 data["journal"][i][field] = value
-            data["journal"][i]["last_updated"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            data["journal"][i]["last_updated"] = timestamp
+            # Append to update history
+            if not isinstance(data["journal"][i].get("update_history"), list):
+                data["journal"][i]["update_history"] = []
+            data["journal"][i]["update_history"].append(timestamp)
             save_data(data)
             return True
     return False
@@ -422,3 +427,112 @@ def get_overdue_tasks():
             continue
 
     return overdue
+
+
+# ─── ROUTINE GOALS & AUTO-GENERATION ─────────────────────────────────────────
+
+def get_routine_goals():
+    # Returns all active goals marked as routine.
+    goals = get_all_goals()
+    return [g for g in goals if g.get("is_routine") and g["status"] == "Active"]
+
+
+def auto_generate_routine_tasks():
+    # On startup, checks every routine goal and creates today's task if it
+    # doesn't already exist. Returns a list of newly created task titles.
+    from models import create_task
+    routine_goals = get_routine_goals()
+    today_str = today()
+    generated = []
+
+    for goal in routine_goals:
+        # Check if a routine task linked to this goal already exists for today
+        todays_tasks = get_tasks_for_today()
+        already_exists = any(
+            t.get("goal_id") == goal["id"] and t.get("is_routine")
+            for t in todays_tasks
+        )
+
+        if not already_exists:
+            # Auto-generate the task using the goal's title and routine time
+            task, error = create_task(
+                title=goal["title"],
+                date=today_str,
+                status="Planned",
+                category=goal.get("category", ""),
+                subcategory=goal.get("subcategory", ""),
+                goal_id=goal["id"],
+                scheduled_time=goal.get("routine_time", ""),
+                is_routine=True,
+                notes=[],
+            )
+            if not error:
+                add_task(task)
+                generated.append(goal["title"])
+
+    return generated
+
+
+# ─── ANALYTICS ────────────────────────────────────────────────────────────────
+
+def get_analytics():
+    # Gathers cross-app analytics data for the analytics dashboard.
+    all_tasks = get_all_tasks()
+    all_goals = get_all_goals()
+
+    total_tasks    = len(all_tasks)
+    completed      = len([t for t in all_tasks if t["status"] == "Complete"])
+    incomplete     = len([t for t in all_tasks if t["status"] == "Incomplete"])
+    skipped        = len([t for t in all_tasks if t["status"] == "Skipped"])
+    postponed      = len([t for t in all_tasks if t["status"] == "Postponed"])
+    abandoned      = len([t for t in all_tasks if t["status"] == "Abandoned: needs update"])
+    planned        = len([t for t in all_tasks if t["status"] == "Planned"])
+
+    overall_rate = round((completed / total_tasks) * 100, 1) if total_tasks else 0
+
+    # Streak leaderboard — top goals by streak
+    goals_with_streaks = sorted(
+        [g for g in all_goals if g.get("streak", 0) > 0],
+        key=lambda g: g["streak"],
+        reverse=True
+    )
+
+    # Most productive day of the week — which day has the most completions
+    day_counts = {0:0, 1:0, 2:0, 3:0, 4:0, 5:0, 6:0}
+    for task in all_tasks:
+        if task["status"] == "Complete" and task.get("date"):
+            try:
+                d = datetime.datetime.strptime(task["date"], "%Y-%m-%d").weekday()
+                day_counts[d] += 1
+            except ValueError:
+                continue
+
+    day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    best_day = day_names[max(day_counts, key=day_counts.get)] if any(day_counts.values()) else "Not enough data"
+
+    # Journal entries count
+    data = load_data()
+    journal_count = len(data.get("journal", []))
+
+    return {
+        "total_tasks":        total_tasks,
+        "completed":          completed,
+        "incomplete":         incomplete,
+        "skipped":            skipped,
+        "postponed":          postponed,
+        "abandoned":          abandoned,
+        "planned":            planned,
+        "overall_rate":       overall_rate,
+        "goals_with_streaks": goals_with_streaks,
+        "best_day":           best_day,
+        "journal_count":      journal_count,
+        "total_goals":        len(all_goals),
+        "active_goals":       len([g for g in all_goals if g["status"] == "Active"]),
+        "achieved_goals":     len([g for g in all_goals if g["status"] == "Achieved"]),
+    }
+
+
+def get_abandoned_tasks():
+    # Returns all tasks with "Abandoned: needs update" status.
+    tasks = get_all_tasks()
+    return [t for t in tasks if t["status"] == "Abandoned: needs update"]

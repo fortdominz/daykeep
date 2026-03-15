@@ -395,13 +395,27 @@ def print_goals_table(goals, title="Goals"):
 
     print()
 
-def print_journal_entry(entry):
+def print_journal_entry(entry, readonly=False):
     if not entry:
         print(colorize("  No journal entry found.", DIM))
         return
 
-    print(colorize(f"  Date:  ", DIM) + entry["date"])
-    print(colorize(f"  Mood:  ", DIM) + colorize_mood(entry.get("mood", "")))
+    print(colorize(f"  Date:    ", DIM) + colorize(entry["date"], BOLD + WHITE))
+    print(colorize(f"  Mood:    ", DIM) + colorize_mood(entry.get("mood", "")))
+    print(colorize(f"  Created: ", DIM) + colorize(entry.get("date_created", "-"), DIM))
+
+    # Show update history
+    history = entry.get("update_history", [])
+    if history:
+        print(colorize(f"  Updated: ", DIM) + colorize(f"{len(history)} time(s)", DIM))
+        for i, timestamp in enumerate(history, 1):
+            print(colorize(f"    {i}. {timestamp}", DIM))
+    else:
+        print(colorize(f"  Updated: ", DIM) + colorize("Never", DIM))
+
+    if readonly:
+        print(colorize("  (Read only — past entries cannot be edited)", YELLOW))
+
     print()
     print_divider()
     print()
@@ -468,13 +482,15 @@ def print_goal_detail(goal):
         ("ID",           str(goal["id"])),
         ("Title",        goal["title"]),
         ("Status",       colorize_goal_status(goal["status"])),
-        ("Category",     goal.get("category") or "—"),
-        ("Sub-category", goal.get("subcategory") or "—"),
-        ("Target Date",  goal.get("target_date") or "—"),
+        ("Category",     goal.get("category") or "-"),
+        ("Sub-category", goal.get("subcategory") or "-"),
+        ("Target Date",  goal.get("target_date") or "-"),
+        ("Routine",      "Yes" if goal.get("is_routine") else "No"),
+        ("Routine Time", goal.get("routine_time") or "-"),
         ("Streak",       colorize_streak(goal.get("streak", 0))),
-        ("Description",  goal.get("description") or "—"),
-        ("Created",      goal.get("date_created", "—")),
-        ("Last Updated", goal.get("last_updated", "—")),
+        ("Description",  goal.get("description") or "-"),
+        ("Created",      goal.get("date_created", "-")),
+        ("Last Updated", goal.get("last_updated", "-")),
     ]
 
     for label, value in fields:
@@ -514,7 +530,7 @@ def journal_editor(existing_lines=None):
     print(colorize("    .undo          ", CYAN) + "→ delete last line")
     print(colorize("    .undo [#]      ", CYAN) + "→ delete a specific line")
     print(colorize("    .edit [#]      ", CYAN) + "→ edit a specific line")
-    print(colorize("    .quit          ", CYAN) + "→ cancel without saving")
+    print(colorize("    .quit          ", CYAN) + "→ cancel (warns if unsaved changes exist)")
     print(colorize("  ─────────────────────────────────────────────", DIM))
     print()
 
@@ -538,7 +554,27 @@ def journal_editor(existing_lines=None):
 
         # ── .quit ──
         elif entry.lower() == ".quit":
-            return None
+            # Check if there are unsaved changes compared to the original entry
+            current_content = "".join(lines).strip()
+            original_content = "".join(existing_lines).strip() if existing_lines else ""
+            if current_content != original_content and lines:
+                print(colorize("  ⚠  You have unsaved changes.", BOLD + YELLOW))
+                print(colorize("  Use .save to save first, or type .quit again to discard.", DIM))
+                # Wait for next input — if it's .quit again, exit without saving
+                confirm = input(f"  {colorize(f'[{len(lines) + 1}]', DIM)} ").strip()
+                if confirm.lower() == ".quit":
+                    return None
+                elif confirm.lower() == ".save":
+                    if not lines:
+                        print(colorize("  Nothing written yet.", RED))
+                        continue
+                    return "".join(lines)
+                else:
+                    # Treat as a new line and continue
+                    if confirm:
+                        lines.append(confirm)
+            else:
+                return None
 
         # ── .undo ──
         elif entry.lower() == ".undo":
@@ -591,71 +627,151 @@ def journal_editor(existing_lines=None):
             print()
 
 
+
+def print_analytics(data):
+    # Displays the full analytics dashboard.
+    print(colorize("  ANALYTICS DASHBOARD", BOLD + WHITE))
+    print_divider()
+    print()
+
+    # Overall completion rate with bar
+    rate = data["overall_rate"]
+    bar_filled = int(rate / 5)
+    bar_empty  = 20 - bar_filled
+    bar_color  = GREEN if rate >= 70 else YELLOW if rate >= 40 else RED
+    bar = colorize("█" * bar_filled, bar_color) + colorize("░" * bar_empty, DIM)
+    print(colorize("  Overall Completion Rate", BOLD + WHITE))
+    print(f"  {bar}  {colorize(f'{rate}%', BOLD + bar_color)}")
+    print()
+
+    # Task breakdown
+    print(colorize("  Task Breakdown", BOLD + WHITE))
+    print_divider()
+    total = data["total_tasks"]
+    rows = [
+        ("Complete",              data["completed"],  GREEN),
+        ("Incomplete",            data["incomplete"], RED),
+        ("Skipped",               data["skipped"],    YELLOW),
+        ("Postponed",             data["postponed"],  PURPLE),
+        ("Abandoned: needs update", data["abandoned"], RED),
+        ("Planned",               data["planned"],    BLUE),
+    ]
+    for label, count, color in rows:
+        bar_len = int((count / total) * 30) if total else 0
+        bar = colorize("█" * bar_len, color) + colorize("░" * (30 - bar_len), DIM)
+        print(f"  {colorize(f'{label:<26}', DIM)} {bar}  {colorize(str(count), BOLD + color)}")
+    print()
+    print(colorize(f"  Total tasks logged: ", DIM) + colorize(str(total), BOLD + WHITE))
+    print()
+
+    # Goals summary
+    print(colorize("  Goals", BOLD + WHITE))
+    print_divider()
+    print(colorize(f"  Total: ", DIM) + colorize(str(data["total_goals"]), BOLD + WHITE) +
+          colorize("   Active: ", DIM) + colorize(str(data["active_goals"]), BOLD + CYAN) +
+          colorize("   Achieved: ", DIM) + colorize(str(data["achieved_goals"]), BOLD + GREEN))
+    print()
+
+    # Streak leaderboard
+    if data["goals_with_streaks"]:
+        print(colorize("  Streak Leaderboard", BOLD + WHITE))
+        print_divider()
+        for i, goal in enumerate(data["goals_with_streaks"][:5], 1):
+            streak = goal.get("streak", 0)
+            print(f"  {colorize(str(i) + '.', DIM)} {goal['title']:<30} {colorize_streak(streak)}")
+        print()
+
+    # Most productive day
+    print(colorize("  Most Productive Day", BOLD + WHITE))
+    print_divider()
+    print(colorize(f"  {data['best_day']}", BOLD + GREEN))
+    print()
+
+    # Journal
+    print(colorize(f"  Journal entries written: ", DIM) + colorize(str(data["journal_count"]), BOLD + WHITE))
+    print()
+
 # ─── STARTUP SUMMARY ──────────────────────────────────────────────────────────
 
-def print_startup_summary(summary, upcoming, overdue, goals, endangered_streaks, user_name=""):
+def section_label(label, color=WHITE):
+    line = f"  -- {label} " + "-" * max(0, 34 - len(label))
+    print(colorize(line, BOLD + color))
+
+def print_startup_summary(summary, upcoming, overdue, goals, endangered_streaks, user_name="", generated=None):
     import datetime
     today_str = datetime.date.today().strftime("%A, %B %d %Y")
     time_str  = datetime.datetime.now().strftime("%I:%M %p")
 
     print()
-    # App banner
     print_banner_with_tagline()
     print()
 
-    # Welcome message
+    # Welcome + date/time
     if user_name:
-        print(colorize(f"  Welcome back, {user_name}! 👋", BOLD + WHITE))
-    print(colorize(f"  📅  {today_str}", WHITE) + colorize(f"  ·  🕐 {time_str}", DIM))
+        print(colorize(f"  Welcome back, {user_name}!", BOLD + WHITE))
+    print(colorize(f"  {today_str}", WHITE) + colorize(f"  |  {time_str}", DIM))
+    print()
+    print_divider()
     print()
 
-    # Today's task summary
+    # AUTO-GENERATED
+    if generated:
+        section_label("AUTO-GENERATED", GREEN)
+        for title in generated:
+            print(colorize(f"    + {title}", GREEN))
+        print()
+
+    # TODAY
+    section_label("TODAY", CYAN)
     if summary["total"] == 0:
-        print(colorize("  No tasks planned for today.", DIM))
+        print(colorize("    No tasks planned for today.", DIM))
     else:
-        print(colorize(f"  Today:  ", DIM) +
-              colorize(f"{summary['completed']} complete", GREEN) + "  " +
-              colorize(f"{summary['planned']} planned", BLUE) + "  " +
-              colorize(f"{summary['incomplete']} incomplete", RED) + "  " +
-              colorize(f"{summary['skipped']} skipped", YELLOW))
-        if summary.get("not_updated", 0) > 0:
-            print(colorize(f"  ⚠  {summary['not_updated']} task(s) need updating from yesterday.", BOLD + RED))
-        print(colorize(f"  Completion rate: ", DIM) +
-              colorize(f"{summary['completion_rate']}%",
-                       BOLD + (GREEN if summary['completion_rate'] >= 70
-                                else YELLOW if summary['completion_rate'] >= 40
-                                else RED)))
+        print(
+            colorize(f"    {summary['planned']} planned", BLUE) + "   " +
+            colorize(f"{summary['completed']} complete", GREEN) + "   " +
+            colorize(f"{summary['incomplete']} incomplete", RED) + "   " +
+            colorize(f"{summary['skipped']} skipped", YELLOW)
+        )
+        rate = summary["completion_rate"]
+        rate_color = GREEN if rate >= 70 else YELLOW if rate >= 40 else RED
+        print(colorize(f"    Completion rate: ", DIM) + colorize(f"{rate}%", BOLD + rate_color))
     print()
 
-    # Streak warnings
+    # ALERTS
+    alerts = []
+    if summary.get("not_updated", 0) > 0:
+        alerts.append((RED, f"{summary['not_updated']} task(s) need updating from yesterday"))
+    for task in overdue:
+        alerts.append((RED, f"Overdue: {task['title']} (was {task['scheduled_time']})"))
+    if alerts:
+        section_label("ALERTS", RED)
+        for color, msg in alerts:
+            print(colorize(f"    ! {msg}", color))
+        print()
+
+    # STREAKS
     if endangered_streaks:
-        print(colorize(f"  🔥  Streak alert!", BOLD + YELLOW))
+        section_label("STREAKS", YELLOW)
         for goal in endangered_streaks:
-            print(colorize(f"    · \"{goal['title']}\" — {goal.get('streak', 0)} day streak at risk", YELLOW))
+            print(colorize(f"    ~ {goal['title']}  -  {goal.get('streak', 0)} day streak at risk", YELLOW))
         print()
 
-    # Overdue alerts
-    if overdue:
-        print(colorize(f"  ⚠  {len(overdue)} overdue task(s):", BOLD + RED))
-        for task in overdue:
-            print(colorize(f"    · {task['title']} — was scheduled at {task['scheduled_time']}", RED))
-        print()
-
-    # Upcoming in next 2 hours
+    # COMING UP
     if upcoming:
-        print(colorize("  ⏰  Coming up:", BOLD + YELLOW))
+        section_label("COMING UP", CYAN)
         for task, minutes in upcoming:
-            print(colorize(f"    · {task['title']} at {task['scheduled_time']} — in {minutes} min", YELLOW))
+            print(colorize(f"    > {task['title']} at {task['scheduled_time']}  -  in {minutes} min", CYAN))
         print()
 
-    # Active goals
+    # GOALS
     active_goals = [g for g in goals if g["status"] == "Active"]
     if active_goals:
-        print(colorize(f"  🎯  Active goals: ", DIM) + colorize(str(len(active_goals)), BOLD + CYAN))
+        section_label("GOALS", PURPLE)
+        print(colorize(f"    {len(active_goals)} active goal(s)", PURPLE))
         for goal in active_goals[:3]:
             streak = goal.get("streak", 0)
-            streak_str = colorize(f" ({streak}d streak)", GREEN) if streak > 0 else ""
-            print(colorize(f"    · {goal['title']}", CYAN) + streak_str)
+            streak_str = colorize(f"  ({streak}d streak)", GREEN) if streak > 0 else ""
+            print(colorize(f"    · {goal['title']}", DIM) + streak_str)
         if len(active_goals) > 3:
             print(colorize(f"    · ...and {len(active_goals) - 3} more", DIM))
         print()
@@ -701,6 +817,7 @@ def print_main_menu(user_name="", endangered_streaks=None):
         ("2", "Goals",          "set and track your goals"),
         ("3", "Journal",        "write and read journal entries"),
         ("4", "All Tasks",      "browse tasks across all dates"),
+        ("5", "Analytics",      "completion rates, streaks, and patterns"),
         ("h", "Help",           "how to use DayKeep"),
         ("q", "Quit",           "exit the app"),
     ]
@@ -732,7 +849,7 @@ def print_help():
             (".undo",             "Delete the last line"),
             (".undo [#]",         "Delete a specific line by number"),
             (".edit [#]",         "Edit a specific line"),
-            (".quit",             "Cancel without saving"),
+            (".quit",             "Cancel — warns if unsaved changes exist, .quit again to confirm"),
         ]),
         ("NAVIGATION", [
             (".quit",             "Cancel and exit to main menu"),

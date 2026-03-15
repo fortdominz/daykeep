@@ -22,10 +22,10 @@ GOAL_CATEGORIES = {
 GOAL_CATEGORY_NAMES = list(GOAL_CATEGORIES.keys())
 
 # Goal statuses available when CREATING a goal
-GOAL_CREATION_STATUSES = ["Active", "Initialized as Cancelled"]
+GOAL_CREATION_STATUSES = ["Active"]
 
 # Goal statuses available when EDITING an existing goal
-GOAL_EDIT_STATUSES = ["Active", "Achieved", "Abandoned", "Initialized as Cancelled"]
+GOAL_EDIT_STATUSES = ["Active", "Achieved", "Inactive", "Cancelled"]
 
 # Task categories and their sub-categories
 TASK_CATEGORIES = {
@@ -44,7 +44,7 @@ TASK_CATEGORY_NAMES = list(TASK_CATEGORIES.keys())
 TASK_CREATION_STATUSES = ["Planned"]
 
 # Task statuses available when EDITING a task
-TASK_EDIT_STATUSES = ["Planned", "Complete", "Incomplete", "Skipped", "Postponed", "Not Updated"]
+TASK_EDIT_STATUSES = ["Planned", "Complete", "Incomplete", "Skipped", "Postponed"]
 
 # Mood ratings for journal entries
 MOOD_LABELS = {
@@ -141,7 +141,7 @@ def get_season_target_date(season_name):
 
 # ─── GOAL ─────────────────────────────────────────────────────────────────────
 
-def create_goal(title, status, description="", category="", subcategory="", target_date=""):
+def create_goal(title, status, description="", category="", subcategory="", target_date="", is_routine=False, routine_time=""):
     # Validates and returns a new goal dictionary.
     # Returns (goal, None) on success or (None, error_message) on failure.
 
@@ -165,6 +165,8 @@ def create_goal(title, status, description="", category="", subcategory="", targ
         "subcategory": subcategory.strip(),
         "target_date": target_date.strip(),
         "status": status,
+        "is_routine": is_routine,
+        "routine_time": routine_time.strip() if routine_time else "",
         "streak": 0,
         "last_streak_date": "",
         "date_created": now(),
@@ -251,6 +253,7 @@ def create_journal_entry(date, content, mood=""):
         "mood": mood,
         "date_created": now(),
         "last_updated": now(),
+        "update_history": [],  # list of timestamps every time the entry was saved
     }
 
     return entry, None

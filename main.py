@@ -520,6 +520,21 @@ def screen_add_goal():
         return nav
 
     print()
+    is_routine_input = ui.ask("Is this a routine goal? (y/n)", default="n").lower()
+    nav = handle_nav(is_routine_input)
+    if nav:
+        return nav
+    is_routine = is_routine_input == "y"
+
+    routine_time = ""
+    if is_routine:
+        print()
+        routine_time = ui.ask_time("What time do you usually do this?")
+        nav = handle_nav(routine_time)
+        if nav:
+            return nav
+
+    print()
     description = ui.ask("Description (optional)")
     nav = handle_nav(description)
     if nav:
@@ -532,6 +547,8 @@ def screen_add_goal():
         category=category,
         subcategory=subcategory,
         target_date=target_date,
+        is_routine=is_routine,
+        routine_time=routine_time,
     )
 
     if error:
@@ -649,7 +666,7 @@ def screen_journal():
         if entry:
             print(ui.colorize("  Today's entry:", ui.BOLD + ui.WHITE))
             print()
-            ui.print_journal_entry(entry)
+            ui.print_journal_entry(entry, readonly=False)
             print(ui.colorize("  e", ui.BOLD + ui.CYAN) + ui.colorize("  Edit today's entry", ui.WHITE))
         else:
             print(ui.colorize("  No entry for today yet.", ui.DIM))
@@ -758,7 +775,8 @@ def screen_past_journal_entries():
         entry = db.get_journal_entry_by_id(int(choice))
         if entry:
             ui.print_header("Journal Entry", entry["date"])
-            ui.print_journal_entry(entry)
+            is_past = entry["date"] != models.today()
+            ui.print_journal_entry(entry, readonly=is_past)
             ui.wait_for_enter()
         else:
             print(ui.colorize("  Entry not found.", ui.RED))
@@ -800,6 +818,55 @@ def screen_all_tasks():
     return NAV_BACK
 
 
+
+def screen_analytics():
+    ui.print_header("Analytics")
+    ui.print_nav_hint()
+    analytics = db.get_analytics()
+    ui.print_analytics(analytics)
+    ui.wait_for_enter()
+
+
+def screen_resolve_abandoned():
+    # Prompts the user to resolve each abandoned task one by one.
+    abandoned = db.get_abandoned_tasks()
+    if not abandoned:
+        return
+
+    ui.clear_screen()
+    print()
+    ui.print_banner_with_tagline()
+    print()
+    print(ui.colorize(f"  ⚠  {len(abandoned)} task(s) need your attention from previous days.", ui.BOLD + ui.RED))
+    print(ui.colorize("  Please update each one before continuing.", ui.DIM))
+    print()
+    ui.print_divider()
+    print()
+
+    for task in abandoned:
+        print(ui.colorize(f"  Task: ", ui.DIM) + ui.colorize(task["title"], ui.BOLD + ui.WHITE))
+        print(ui.colorize(f"  Date: ", ui.DIM) + task["date"])
+        print()
+
+        new_status = ui.pick_from_list(
+            "What happened with this task?",
+            ["Complete", "Incomplete", "Skipped"],
+            allow_cancel=False
+        )
+
+        updated = {"status": new_status}
+        if new_status == "Complete":
+            updated["date_completed"] = models.now()
+            if task.get("is_routine") and task.get("goal_id"):
+                db.update_goal_streak(task["goal_id"])
+
+        db.update_task(task["id"], updated)
+        print(ui.colorize(f"  Marked as {new_status}.", ui.GREEN))
+        print()
+
+    print(ui.colorize("  All caught up! 🎉", ui.BOLD + ui.GREEN))
+    ui.wait_for_enter()
+
 # ─── HELP ─────────────────────────────────────────────────────────────────────
 
 def screen_help():
@@ -837,6 +904,7 @@ def screen_first_run():
 def show_startup():
     ui.clear_screen()
     db.check_and_flag_stale_tasks()
+    generated = db.auto_generate_routine_tasks()
     summary           = db.get_todays_summary()
     upcoming          = db.get_upcoming_tasks(hours=2)
     overdue           = db.get_overdue_tasks()
@@ -844,7 +912,7 @@ def show_startup():
     endangered_streaks = db.get_goals_with_endangered_streaks()
     user              = db.get_user()
     user_name         = user.get("name", "")
-    ui.print_startup_summary(summary, upcoming, overdue, goals, endangered_streaks, user_name)
+    ui.print_startup_summary(summary, upcoming, overdue, goals, endangered_streaks, user_name, generated)
 
 
 def show_main_menu():
@@ -869,6 +937,7 @@ def show_main_menu():
             "2": screen_goals,
             "3": screen_journal,
             "4": screen_all_tasks,
+            "5": screen_analytics,
             "h": screen_help,
         }
 
@@ -893,6 +962,10 @@ def run():
 
     show_startup()
     ui.wait_for_enter("  Press Enter to open the menu...")
+
+    # Resolve any abandoned tasks before opening the menu
+    screen_resolve_abandoned()
+
     show_main_menu()
 
 
