@@ -867,6 +867,55 @@ def screen_resolve_abandoned():
     print(ui.colorize("  All caught up! 🎉", ui.BOLD + ui.GREEN))
     ui.wait_for_enter()
 
+
+def screen_export():
+    while True:
+        ui.print_header("Export Data")
+        ui.print_nav_hint()
+
+        print(ui.colorize("  Export your data to CSV files openable in Excel or Google Sheets.", ui.DIM))
+        print()
+        print(ui.colorize("  1", ui.BOLD + ui.CYAN) + ui.colorize("  Export all tasks", ui.WHITE))
+        print(ui.colorize("  2", ui.BOLD + ui.CYAN) + ui.colorize("  Export all goals", ui.WHITE))
+        print(ui.colorize("  3", ui.BOLD + ui.CYAN) + ui.colorize("  Export everything", ui.WHITE))
+        print(ui.colorize("  b", ui.BOLD + ui.CYAN) + ui.colorize("  Back to main menu", ui.WHITE))
+        print()
+
+        choice = input(ui.colorize("  Choice: ", ui.CYAN)).strip().lower()
+
+        nav = handle_nav(choice)
+        if nav in (NAV_QUIT, NAV_MAIN, NAV_BACK):
+            return nav
+
+        if choice == "b":
+            return NAV_BACK
+
+        elif choice == "1":
+            count = db.export_tasks_to_csv()
+            if count:
+                print(ui.colorize(f"  Exported {count} task(s) to daykeep_tasks.csv", ui.GREEN))
+            else:
+                print(ui.colorize("  No tasks to export.", ui.DIM))
+            ui.wait_for_enter()
+
+        elif choice == "2":
+            count = db.export_goals_to_csv()
+            if count:
+                print(ui.colorize(f"  Exported {count} goal(s) to daykeep_goals.csv", ui.GREEN))
+            else:
+                print(ui.colorize("  No goals to export.", ui.DIM))
+            ui.wait_for_enter()
+
+        elif choice == "3":
+            task_count = db.export_tasks_to_csv()
+            goal_count = db.export_goals_to_csv()
+            if task_count or goal_count:
+                print(ui.colorize(f"  Exported {task_count} task(s) to daykeep_tasks.csv", ui.GREEN))
+                print(ui.colorize(f"  Exported {goal_count} goal(s) to daykeep_goals.csv", ui.GREEN))
+            else:
+                print(ui.colorize("  Nothing to export.", ui.DIM))
+            ui.wait_for_enter()
+
 # ─── HELP ─────────────────────────────────────────────────────────────────────
 
 def screen_help():
@@ -938,6 +987,7 @@ def show_main_menu():
             "3": screen_journal,
             "4": screen_all_tasks,
             "5": screen_analytics,
+            "6": screen_export,
             "h": screen_help,
         }
 

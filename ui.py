@@ -818,6 +818,7 @@ def print_main_menu(user_name="", endangered_streaks=None):
         ("3", "Journal",        "write and read journal entries"),
         ("4", "All Tasks",      "browse tasks across all dates"),
         ("5", "Analytics",      "completion rates, streaks, and patterns"),
+        ("6", "Export",         "export tasks and goals to CSV"),
         ("h", "Help",           "how to use DayKeep"),
         ("q", "Quit",           "exit the app"),
     ]
@@ -857,9 +858,15 @@ def print_help():
             (".main",             "Go directly to the main menu"),
             ("0 or Cancel",       "Cancel a picker selection"),
         ]),
+        ("EXPORT", [
+            ("6 -> Export",       "Export all tasks or goals to CSV"),
+            ("Tasks CSV",         "Saved as daykeep_tasks.csv in the app folder"),
+            ("Goals CSV",         "Saved as daykeep_goals.csv in the app folder"),
+        ]),
         ("GENERAL", [
             ("h",                 "Open this help screen"),
             ("q",                 "Quit the app"),
+            (".quit / .back / .main", "Navigate from any screen"),
         ]),
     ]
 

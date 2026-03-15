@@ -536,3 +536,56 @@ def get_abandoned_tasks():
     # Returns all tasks with "Abandoned: needs update" status.
     tasks = get_all_tasks()
     return [t for t in tasks if t["status"] == "Abandoned: needs update"]
+
+
+# ─── CSV EXPORT ───────────────────────────────────────────────────────────────
+
+def export_tasks_to_csv(filepath="daykeep_tasks.csv"):
+    import csv
+    tasks = get_all_tasks()
+    if not tasks:
+        return 0
+
+    fields = [
+        "id", "title", "date", "status", "category", "subcategory",
+        "scheduled_time", "is_routine", "goal_id", "time_spent",
+        "date_completed", "date_created", "last_updated", "notes", "postpone_history"
+    ]
+
+    with open(filepath, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
+        writer.writeheader()
+        for task in tasks:
+            row = dict(task)
+            # Flatten notes list to readable string
+            notes = task.get("notes", [])
+            if isinstance(notes, list):
+                row["notes"] = " | ".join([f"({chr(ord('a')+i)}) {n['text']}" for i, n in enumerate(notes)])
+            # Flatten postpone history
+            history = task.get("postpone_history", [])
+            if isinstance(history, list):
+                row["postpone_history"] = f"{len(history)} postpone(s)"
+            writer.writerow(row)
+
+    return len(tasks)
+
+
+def export_goals_to_csv(filepath="daykeep_goals.csv"):
+    import csv
+    goals = get_all_goals()
+    if not goals:
+        return 0
+
+    fields = [
+        "id", "title", "status", "category", "subcategory",
+        "target_date", "is_routine", "routine_time", "streak",
+        "last_streak_date", "description", "date_created", "last_updated"
+    ]
+
+    with open(filepath, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
+        writer.writeheader()
+        for goal in goals:
+            writer.writerow({field: goal.get(field, "") for field in fields})
+
+    return len(goals)
