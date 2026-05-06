@@ -311,8 +311,10 @@ def get_journal():
 
 @app.get("/api/journal/today")
 def get_todays_journal():
-    entry = db.get_todays_journal_entry()
-    return entry if entry else {}
+    # Returns ALL entries for today (multiple allowed)
+    all_entries = db.get_all_journal_entries()
+    today_str = today()
+    return [e for e in all_entries if e.get("date") == today_str]
 
 @app.get("/api/journal/{entry_id}")
 def get_journal_entry(entry_id: int):
@@ -327,10 +329,6 @@ def create_journal_endpoint(body: JournalCreate):
 
     if not check_date_format(entry_date):
         raise HTTPException(status_code=400, detail="Date must be YYYY-MM-DD.")
-
-    existing = db.get_journal_entry_by_date(entry_date)
-    if existing:
-        raise HTTPException(status_code=409, detail="Entry for this date already exists.")
 
     if not body.text.strip():
         raise HTTPException(status_code=400, detail="Entry cannot be empty.")

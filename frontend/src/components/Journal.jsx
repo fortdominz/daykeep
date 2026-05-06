@@ -11,37 +11,143 @@ const MOOD_COLORS = {
 }
 
 function getMoodColor(mood) {
-  // mood may come back as string "1"-"5" or integer 1-5
   return MOOD_COLORS[Number(mood)] || 'var(--muted)'
 }
-
 function getMoodLabel(mood) {
   return MOOD_LABELS[Number(mood)] || ''
 }
-
 function getEntryText(entry) {
-  // models.py stores as "content"; frontend sends as "text"
   return entry?.content || entry?.text || entry?.entry || ''
 }
+function formatTime(dateCreated) {
+  if (!dateCreated) return ''
+  try {
+    const d = new Date(dateCreated.replace(' ', 'T'))
+    return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+  } catch { return '' }
+}
 
-export default function Journal() {
-  const [entries, setEntries] = useState([])
-  const [todaysEntry, setTodaysEntry] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [selected, setSelected] = useState(null)
-  const [writeMode, setWriteMode] = useState(false)
-  const [form, setForm] = useState({ text: '', mood: 3 })
+// ─── WRITE FORM ──────────────────────────────────────────────────────────────
+
+function WriteForm({ entry, onSave, onCancel, onDelete }) {
+  const [text, setText] = useState(entry ? getEntryText(entry) : '')
+  const [mood, setMood] = useState(entry ? Number(entry.mood) || 3 : 3)
   const [saving, setSaving] = useState(false)
 
+  async function handleSubmit(e) {
+    e.preventDefault()
+    if (!text.trim()) return
+    setSaving(true)
+    try {
+      await onSave(text.trim(), mood)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const isEdit = !!entry
+
+  return (
+    <form onSubmit={handleSubmit} style={s.writeForm}>
+      <div style={s.formTop}>
+        <span style={s.formLabel}>{isEdit ? 'Edit entry' : 'New entry'}</span>
+        <button type="button" onClick={onCancel} style={s.closeBtn}>✕ Close</button>
+      </div>
+
+      {/* Mood picker */}
+      <div style={s.moodRow}>
+        <span style={s.moodLabel}>Mood</span>
+        {[1, 2, 3, 4, 5].map(m => (
+          <button
+            key={m}
+            type="button"
+            onClick={() => setMood(m)}
+            style={{
+              ...s.moodBtn,
+              borderColor: mood === m ? getMoodColor(m) : 'var(--border)',
+              backgroundColor: mood === m ? `${getMoodColor(m)}22` : 'transparent',
+              color: mood === m ? getMoodColor(m) : 'var(--muted)',
+            }}
+          >
+            {MOOD_LABELS[m]}
+          </button>
+        ))}
+      </div>
+
+      <textarea
+        value={text}
+        onChange={e => setText(e.target.value)}
+        placeholder="What's on your mind?"
+        rows={6}
+        style={s.textarea}
+        autoFocus
+      />
+
+      <div style={s.formActions}>
+        {isEdit && onDelete && (
+          <button type="button" onClick={onDelete} style={s.deleteBtn}>
+            Delete
+          </button>
+        )}
+        <button
+          type="submit"
+          disabled={saving || !text.trim()}
+          style={{ ...s.primaryBtn, opacity: (!text.trim() && !saving) ? 0.5 : 1 }}
+        >
+          {saving ? 'Saving...' : isEdit ? 'Save changes' : 'Save entry'}
+        </button>
+      </div>
+    </form>
+  )
+}
+
+// ─── PAST ENTRY MODAL ────────────────────────────────────────────────────────
+
+function PastEntryModal({ entry, onClose }) {
+  if (!entry) return null
+  const text = getEntryText(entry)
+  const mood = Number(entry.mood)
+
+  return (
+    <div style={s.modalOverlay} onClick={onClose}>
+      <div style={s.modalBox} onClick={e => e.stopPropagation()}>
+        <div style={s.modalHeader}>
+          <div style={s.modalDate}>{entry.date}</div>
+          {mood > 0 && (
+            <div style={s.modalMood}>
+              <span style={{ ...s.moodDot, backgroundColor: getMoodColor(mood) }} />
+              <span style={{ color: getMoodColor(mood), fontWeight: 600 }}>{getMoodLabel(mood)}</span>
+            </div>
+          )}
+          <button onClick={onClose} style={s.closeBtn}>✕ Close</button>
+        </div>
+        <div style={s.modalTime}>{formatTime(entry.date_created)}</div>
+        <p style={s.modalBody}>{text}</p>
+      </div>
+    </div>
+  )
+}
+
+// ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
+
+export default function Journal() {
   const today = new Date().toISOString().split('T')[0]
+
+  const [allEntries, setAllEntries] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  // Form state: null = closed, 'new' = new entry, entry object = editing
+  const [formMode, setFormMode] = useState(null)
+
+  // Past entry modal
+  const [modalEntry, setModalEntry] = useState(null)
 
   const load = useCallback(async () => {
     setError(null)
     try {
-      const [all, todayE] = await Promise.all([api.getJournal(), api.getTodaysJournal()])
-      setEntries(Array.isArray(all) ? all : [])
-      setTodaysEntry(todayE && todayE.id ? todayE : null)
+      const all = await api.getJournal()
+      setAllEntries(Array.isArray(all) ? all : [])
     } catch (e) {
       setError(e.message)
     } finally {
@@ -51,48 +157,46 @@ export default function Journal() {
 
   useEffect(() => { load() }, [load])
 
-  function openWrite() {
-    if (todaysEntry) {
-      setForm({ text: getEntryText(todaysEntry), mood: Number(todaysEntry.mood) || 3 })
-      setSelected(todaysEntry)
-    } else {
-      setForm({ text: '', mood: 3 })
-      setSelected(null)
-    }
-    setWriteMode(true)
+  const todaysEntries = allEntries.filter(e => e.date === today)
+    .sort((a, b) => (b.date_created || '').localeCompare(a.date_created || ''))
+
+  const pastEntries = allEntries.filter(e => e.date < today)
+    .sort((a, b) => b.date.localeCompare(a.date))
+
+  // ── handlers ──
+
+  async function handleNew(text, mood) {
+    await api.createJournal({ text, mood })
+    setFormMode(null)
+    load()
   }
 
-  async function handleSave(e) {
-    e.preventDefault()
-    if (!form.text.trim()) return
-    setSaving(true)
-    try {
-      if (todaysEntry) {
-        await api.updateJournal(todaysEntry.id, { text: form.text, mood: Number(form.mood) })
-      } else {
-        await api.createJournal({ text: form.text, mood: Number(form.mood) })
-      }
-      setWriteMode(false)
-      setSelected(null)
-      load()
-    } catch (e) {
-      alert(e.message)
-    } finally {
-      setSaving(false)
-    }
+  async function handleEdit(entry, text, mood) {
+    await api.updateJournal(entry.id, { text, mood })
+    setFormMode(null)
+    load()
   }
 
   async function handleDelete(id) {
-    if (!confirm('Delete this journal entry?')) return
-    try {
-      await api.deleteJournal(id)
-      if (selected?.id === id) setSelected(null)
-      setWriteMode(false)
-      load()
-    } catch (e) {
-      alert(e.message)
-    }
+    if (!confirm('Delete this entry?')) return
+    await api.deleteJournal(id)
+    setFormMode(null)
+    load()
   }
+
+  function openEdit(entry) {
+    setFormMode(entry)  // entry object = editing that entry
+  }
+
+  function openNew() {
+    setFormMode('new')
+  }
+
+  function closeForm() {
+    setFormMode(false)
+  }
+
+  // ── render ──
 
   if (loading) return <PageShell><LoadingState /></PageShell>
 
@@ -106,178 +210,133 @@ export default function Journal() {
     </PageShell>
   )
 
-  const hasTodayEntry = !!todaysEntry
+  const isEditing = formMode && formMode !== 'new'
+  const isNew = formMode === 'new'
 
   return (
     <PageShell>
+      {/* Header */}
       <div style={s.header}>
         <div>
           <h1 style={s.pageTitle}>Journal</h1>
-          <p style={s.subtitle}>{entries.length} entr{entries.length !== 1 ? 'ies' : 'y'}</p>
+          <p style={s.subtitle}>{allEntries.length} entr{allEntries.length !== 1 ? 'ies' : 'y'}</p>
         </div>
-        <button onClick={openWrite} style={s.primaryBtn}>
-          {hasTodayEntry ? '✎ Edit Today' : '+ Write Today'}
-        </button>
+        {!formMode && (
+          <button onClick={openNew} style={s.primaryBtn}>+ New Entry</button>
+        )}
       </div>
 
-      {/* Today's entry preview */}
-      {hasTodayEntry && !writeMode && (
-        <div style={s.todayBanner}>
-          <div style={s.todayLabel}>TODAY — {today}</div>
-          <div style={s.todayMood}>
-            <span style={{ ...s.moodDot, backgroundColor: getMoodColor(todaysEntry.mood) }} />
-            <span style={{ color: getMoodColor(todaysEntry.mood), fontWeight: 600 }}>
-              {getMoodLabel(todaysEntry.mood) || 'No mood'}
-            </span>
-          </div>
-          <p style={s.todayPreview}>
-            {(() => {
-              const txt = getEntryText(todaysEntry)
-              return txt.length > 200 ? txt.slice(0, 200) + '…' : txt
-            })()}
-          </p>
+      {/* New entry form */}
+      {isNew && (
+        <WriteForm
+          entry={null}
+          onSave={handleNew}
+          onCancel={closeForm}
+        />
+      )}
+
+      {/* ── Today's entries ── */}
+      <div style={s.sectionHeader}>
+        <span style={s.sectionTitle}>Today — {today}</span>
+        <span style={s.sectionCount}>{todaysEntries.length}</span>
+      </div>
+
+      {todaysEntries.length === 0 ? (
+        <div style={s.emptyToday}>
+          Nothing written yet today.{' '}
+          <button onClick={openNew} style={s.inlineLink}>Write something →</button>
+        </div>
+      ) : (
+        <div style={s.todayList}>
+          {todaysEntries.map(entry => {
+            const isEditingThis = isEditing && formMode?.id === entry.id
+            return (
+              <div key={entry.id} style={s.todayCard}>
+                {isEditingThis ? (
+                  <WriteForm
+                    entry={entry}
+                    onSave={(text, mood) => handleEdit(entry, text, mood)}
+                    onCancel={closeForm}
+                    onDelete={() => handleDelete(entry.id)}
+                  />
+                ) : (
+                  <>
+                    <div style={s.todayCardTop}>
+                      {Number(entry.mood) > 0 && (
+                        <div style={s.moodPill}>
+                          <span style={{ ...s.moodDot, backgroundColor: getMoodColor(entry.mood) }} />
+                          <span style={{ color: getMoodColor(entry.mood), fontWeight: 600 }}>
+                            {getMoodLabel(entry.mood)}
+                          </span>
+                        </div>
+                      )}
+                      <span style={s.entryTime}>{formatTime(entry.date_created)}</span>
+                      <button
+                        onClick={() => openEdit(entry)}
+                        style={s.editBtn}
+                        disabled={!!formMode}
+                      >
+                        ✎ Edit
+                      </button>
+                    </div>
+                    <p style={s.todayText}>{getEntryText(entry)}</p>
+                  </>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
 
-      {!hasTodayEntry && !writeMode && (
-        <div style={s.writePrompt}>
-          <span style={s.promptIcon}>▪</span>
-          <span>You haven't written today yet. How's your day?</span>
-          <button onClick={openWrite} style={s.promptBtn}>Write now →</button>
-        </div>
-      )}
-
-      {/* Write / edit form */}
-      {writeMode && (
-        <form onSubmit={handleSave} style={s.writeForm}>
-          <div style={s.writeHeader}>
-            <span style={s.writeDate}>{today}</span>
-            <button type="button" onClick={() => setWriteMode(false)} style={s.closeBtn}>✕ Close</button>
-          </div>
-
-          {/* Mood picker */}
-          <div style={s.moodRow}>
-            <span style={s.moodLabel}>How are you?</span>
-            {[1, 2, 3, 4, 5].map(m => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => setForm(f => ({ ...f, mood: m }))}
-                style={{
-                  ...s.moodBtn,
-                  borderColor: form.mood === m ? getMoodColor(m) : 'var(--border)',
-                  backgroundColor: form.mood === m ? `${getMoodColor(m)}22` : 'transparent',
-                  color: form.mood === m ? getMoodColor(m) : 'var(--muted)',
-                }}
-              >
-                {MOOD_LABELS[m]}
-              </button>
-            ))}
-          </div>
-
-          <textarea
-            value={form.text}
-            onChange={e => setForm(f => ({ ...f, text: e.target.value }))}
-            placeholder="What happened today? What are you thinking about?"
-            rows={8}
-            style={s.textarea}
-            autoFocus
-          />
-
-          <div style={s.writeActions}>
-            {hasTodayEntry && (
-              <button type="button" onClick={() => handleDelete(todaysEntry.id)} style={s.deleteBtn}>
-                Delete entry
-              </button>
-            )}
-            <button type="submit" disabled={saving || !form.text.trim()} style={s.primaryBtn}>
-              {saving ? 'Saving...' : hasTodayEntry ? 'Update' : 'Save Entry'}
-            </button>
-          </div>
-        </form>
-      )}
-
-      {/* Past entries grid */}
-      {entries.length > 0 && (
+      {/* ── Past entries ── */}
+      {pastEntries.length > 0 && (
         <>
-          <div style={s.sectionHeader}>
-            {entries.length} Past Entr{entries.length !== 1 ? 'ies' : 'y'}
+          <div style={{ ...s.sectionHeader, marginTop: 32 }}>
+            <span style={s.sectionTitle}>Past Entries</span>
+            <span style={s.sectionCount}>{pastEntries.length}</span>
           </div>
-          <div style={s.entryGrid}>
-            {entries.map(entry => {
-              if (!entry || !entry.id) return null
+          <div style={s.pastGrid}>
+            {pastEntries.map(entry => {
+              const mood = Number(entry.mood)
+              const text = getEntryText(entry)
               return (
-                <EntryCard
+                <div
                   key={entry.id}
-                  entry={entry}
-                  isToday={entry.date === today}
-                  selected={selected?.id === entry.id}
-                  onSelect={() => setSelected(prev => prev?.id === entry.id ? null : entry)}
-                  onDelete={() => handleDelete(entry.id)}
-                />
+                  onClick={() => setModalEntry(entry)}
+                  style={s.pastCard}
+                  title="Click to read"
+                >
+                  <div style={s.pastCardTop}>
+                    <span style={s.pastDate}>{entry.date}</span>
+                    {mood > 0 && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <span style={{ ...s.moodDot, width: 7, height: 7, backgroundColor: getMoodColor(mood) }} />
+                        <span style={{ fontSize: '0.68rem', color: getMoodColor(mood), fontFamily: "'JetBrains Mono', monospace" }}>
+                          {getMoodLabel(mood)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  <p style={s.pastPreview}>
+                    {text.length > 110 ? text.slice(0, 110) + '…' : text || '(no content)'}
+                  </p>
+                  <span style={s.expandHint}>↗ Read</span>
+                </div>
               )
             })}
           </div>
         </>
       )}
 
-      {/* Read panel — slides in from bottom-right */}
-      {selected && !writeMode && (
-        <div style={s.readPanel}>
-          <div style={s.readHeader}>
-            <span style={s.readDate}>{selected.date}</span>
-            <div style={s.readMood}>
-              <span style={{ ...s.moodDot, backgroundColor: getMoodColor(selected.mood) }} />
-              <span style={{ color: getMoodColor(selected.mood), fontSize: '0.75rem' }}>
-                {getMoodLabel(selected.mood) || ''}
-              </span>
-            </div>
-            <button onClick={() => setSelected(null)} style={s.closeBtn}>✕</button>
-          </div>
-          <p style={s.readBody}>{getEntryText(selected)}</p>
-          <button
-            onClick={() => handleDelete(selected.id)}
-            style={{ ...s.deleteBtn, marginTop: 14 }}
-          >
-            Delete this entry
-          </button>
-        </div>
+      {/* Past entry full-screen modal */}
+      {modalEntry && (
+        <PastEntryModal entry={modalEntry} onClose={() => setModalEntry(null)} />
       )}
     </PageShell>
   )
 }
 
-function EntryCard({ entry, isToday, selected, onSelect, onDelete }) {
-  const mood = entry.mood || 0
-  const color = getMoodColor(mood)
-  const text = getEntryText(entry)
-
-  return (
-    <div
-      onClick={onSelect}
-      style={{
-        ...s.entryCard,
-        borderColor: selected ? 'var(--amber)' : 'var(--border)',
-        cursor: 'pointer',
-      }}
-    >
-      <div style={s.entryTop}>
-        <span style={s.entryDate}>{isToday ? 'Today' : entry.date}</span>
-        {mood > 0 && (
-          <>
-            <span style={{ ...s.moodDot, backgroundColor: color, width: 7, height: 7 }} />
-            <span style={{ fontSize: '0.68rem', color, fontFamily: "'JetBrains Mono', monospace" }}>
-              {getMoodLabel(mood)}
-            </span>
-          </>
-        )}
-      </div>
-      <p style={s.entryPreview}>
-        {text.length > 120 ? text.slice(0, 120) + '…' : text || '(no content)'}
-      </p>
-    </div>
-  )
-}
+// ─── SHARED ──────────────────────────────────────────────────────────────────
 
 function LoadingState() {
   return (
@@ -298,99 +357,108 @@ function PageShell({ children }) {
   return <div style={s.page}>{children}</div>
 }
 
+// ─── STYLES ──────────────────────────────────────────────────────────────────
+
 const s = {
   page: { padding: '32px 36px', maxWidth: 860, animation: 'fadeIn 0.2s ease' },
+
   header: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 24 },
   pageTitle: { fontSize: '1.8rem', fontWeight: 700, color: '#e6edf3', lineHeight: 1.1 },
   subtitle: { fontSize: '0.75rem', color: 'var(--muted)', fontFamily: "'JetBrains Mono', monospace", marginTop: 4 },
+
   primaryBtn: {
     backgroundColor: 'var(--amber)', color: '#0d1117', border: 'none',
     borderRadius: 6, padding: '8px 18px', fontWeight: 700, fontSize: '0.82rem',
     cursor: 'pointer', fontFamily: 'inherit',
   },
-  errorBox: {
-    padding: '32px', backgroundColor: 'var(--surface)', border: '1px solid var(--red)',
-    borderRadius: 10, marginTop: 20,
-  },
-  errorTitle: { fontWeight: 700, color: 'var(--red)', marginBottom: 6, fontSize: '0.9rem' },
-  errorMsg: { color: 'var(--muted)', fontFamily: "'JetBrains Mono', monospace", fontSize: '0.78rem', marginBottom: 16 },
-  retryBtn: {
-    background: 'none', border: '1px solid var(--red)', color: 'var(--red)',
-    borderRadius: 6, padding: '6px 16px', cursor: 'pointer', fontFamily: 'inherit', fontSize: '0.78rem',
-  },
-  todayBanner: {
-    backgroundColor: 'var(--surface)', border: '1px solid var(--amber)', borderRadius: 10,
-    padding: '16px 20px', marginBottom: 24,
-  },
-  todayLabel: {
-    fontSize: '0.65rem', fontFamily: "'JetBrains Mono', monospace",
-    color: 'var(--amber)', letterSpacing: '0.08em', marginBottom: 6,
-  },
-  todayMood: { display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 },
-  moodDot: { width: 10, height: 10, borderRadius: '50%', display: 'inline-block', flexShrink: 0 },
-  todayPreview: { fontSize: '0.88rem', color: 'var(--text)', lineHeight: 1.6 },
-  writePrompt: {
-    display: 'flex', alignItems: 'center', gap: 12, padding: '16px 20px',
-    backgroundColor: 'var(--surface)', border: '1px dashed var(--border)', borderRadius: 10,
-    marginBottom: 24, fontSize: '0.85rem', color: 'var(--muted)',
-  },
-  promptIcon: { color: 'var(--amber)', fontSize: '1.1rem' },
-  promptBtn: {
-    marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--amber)',
-    cursor: 'pointer', fontSize: '0.82rem', fontFamily: 'inherit', fontWeight: 600,
-  },
+
+  // Write form
   writeForm: {
     backgroundColor: 'var(--surface)', border: '1px solid var(--amber)',
-    borderRadius: 10, padding: '20px', marginBottom: 24,
+    borderRadius: 10, padding: '18px 20px', marginBottom: 20,
   },
-  writeHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
-  writeDate: { fontSize: '0.75rem', fontFamily: "'JetBrains Mono', monospace", color: 'var(--amber)' },
-  closeBtn: {
-    background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer',
-    fontSize: '0.78rem', fontFamily: "'JetBrains Mono', monospace",
-  },
-  moodRow: { display: 'flex', alignItems: 'center', gap: 6, marginBottom: 14, flexWrap: 'wrap' },
-  moodLabel: {
-    fontSize: '0.72rem', color: 'var(--muted)', fontFamily: "'JetBrains Mono', monospace", marginRight: 4,
-  },
+  formTop: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  formLabel: { fontSize: '0.72rem', fontFamily: "'JetBrains Mono', monospace", color: 'var(--amber)', textTransform: 'uppercase', letterSpacing: '0.06em' },
+  closeBtn: { background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: '0.75rem', fontFamily: "'JetBrains Mono', monospace" },
+  moodRow: { display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12, flexWrap: 'wrap' },
+  moodLabel: { fontSize: '0.7rem', color: 'var(--muted)', fontFamily: "'JetBrains Mono', monospace", marginRight: 4 },
   moodBtn: {
-    border: '1px solid', borderRadius: 20, padding: '3px 12px', fontSize: '0.75rem',
+    border: '1px solid', borderRadius: 20, padding: '3px 11px', fontSize: '0.73rem',
     cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s', background: 'none',
   },
   textarea: {
     width: '100%', backgroundColor: 'var(--bg)', border: '1px solid var(--border)',
-    borderRadius: 8, padding: '14px 16px', color: 'var(--text)', fontFamily: 'inherit',
+    borderRadius: 8, padding: '12px 14px', color: 'var(--text)', fontFamily: 'inherit',
     fontSize: '0.9rem', lineHeight: 1.7, resize: 'vertical', outline: 'none',
-    transition: 'border-color 0.15s', minHeight: 160,
+    transition: 'border-color 0.15s', minHeight: 120,
   },
-  writeActions: { marginTop: 14, display: 'flex', justifyContent: 'flex-end', gap: 10, alignItems: 'center' },
-  deleteBtn: {
-    background: 'none', border: 'none', color: 'var(--red)', cursor: 'pointer',
-    fontSize: '0.78rem', fontFamily: 'inherit', marginRight: 'auto',
-  },
+  formActions: { marginTop: 12, display: 'flex', justifyContent: 'flex-end', gap: 10, alignItems: 'center' },
+  deleteBtn: { background: 'none', border: 'none', color: 'var(--red)', cursor: 'pointer', fontSize: '0.78rem', fontFamily: 'inherit', marginRight: 'auto' },
+
+  // Section headers
   sectionHeader: {
-    fontSize: '0.72rem', fontFamily: "'JetBrains Mono', monospace", color: 'var(--muted)',
-    textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 12,
+    display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12,
     paddingBottom: 8, borderBottom: '1px solid var(--border)',
   },
-  entryGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 },
-  entryCard: {
-    backgroundColor: 'var(--surface)', border: '1px solid',
-    borderRadius: 8, padding: '12px 14px', transition: 'border-color 0.15s',
+  sectionTitle: { fontSize: '0.72rem', fontFamily: "'JetBrains Mono', monospace", color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' },
+  sectionCount: {
+    fontSize: '0.7rem', fontFamily: "'JetBrains Mono', monospace", color: 'var(--muted)',
+    backgroundColor: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 10, padding: '1px 7px',
   },
-  entryTop: { display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 },
-  entryDate: { fontSize: '0.72rem', fontFamily: "'JetBrains Mono', monospace", color: 'var(--muted)', flex: 1 },
-  entryPreview: { fontSize: '0.8rem', color: 'var(--muted)', lineHeight: 1.5 },
-  readPanel: {
-    position: 'fixed', bottom: 24, right: 24, width: 420,
-    maxWidth: 'calc(100vw - 48px)',
-    backgroundColor: 'var(--surface)', border: '1px solid var(--amber)', borderRadius: 12,
-    padding: '20px', boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-    maxHeight: '60vh', overflowY: 'auto', zIndex: 100,
+
+  // Today's entries
+  emptyToday: { fontSize: '0.85rem', color: 'var(--muted)', padding: '20px 0', marginBottom: 8 },
+  inlineLink: { background: 'none', border: 'none', color: 'var(--amber)', cursor: 'pointer', fontFamily: 'inherit', fontSize: '0.85rem', fontWeight: 600 },
+  todayList: { display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 8 },
+  todayCard: {
+    backgroundColor: 'var(--surface)', border: '1px solid var(--border)',
+    borderRadius: 10, overflow: 'hidden',
   },
-  readHeader: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 },
-  readDate: { fontSize: '0.72rem', fontFamily: "'JetBrains Mono', monospace", color: 'var(--muted)', flex: 1 },
-  readMood: { display: 'flex', alignItems: 'center', gap: 5 },
-  readBody: { fontSize: '0.88rem', color: 'var(--text)', lineHeight: 1.7, whiteSpace: 'pre-wrap' },
-  empty: { padding: '48px 0', color: 'var(--muted)', fontSize: '0.85rem', textAlign: 'center' },
+  todayCardTop: { display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px 0' },
+  moodPill: { display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.78rem' },
+  moodDot: { width: 9, height: 9, borderRadius: '50%', display: 'inline-block', flexShrink: 0 },
+  entryTime: { fontSize: '0.68rem', fontFamily: "'JetBrains Mono', monospace", color: 'var(--muted)', flex: 1 },
+  editBtn: {
+    background: 'none', border: '1px solid var(--border)', color: 'var(--muted)',
+    borderRadius: 5, padding: '3px 10px', fontSize: '0.72rem', cursor: 'pointer',
+    fontFamily: "'JetBrains Mono', monospace", transition: 'color 0.15s, border-color 0.15s',
+  },
+  todayText: { padding: '10px 16px 14px', fontSize: '0.9rem', color: 'var(--text)', lineHeight: 1.65, whiteSpace: 'pre-wrap' },
+
+  // Past entries
+  pastGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 },
+  pastCard: {
+    backgroundColor: 'var(--surface)', border: '1px solid var(--border)',
+    borderRadius: 8, padding: '12px 14px', cursor: 'pointer',
+    transition: 'border-color 0.15s',
+    position: 'relative',
+  },
+  pastCardTop: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
+  pastDate: { fontSize: '0.72rem', fontFamily: "'JetBrains Mono', monospace", color: 'var(--muted)' },
+  pastPreview: { fontSize: '0.8rem', color: 'var(--muted)', lineHeight: 1.5, marginBottom: 8 },
+  expandHint: { fontSize: '0.65rem', fontFamily: "'JetBrains Mono', monospace", color: 'var(--border)' },
+
+  // Modal
+  modalOverlay: {
+    position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.7)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    zIndex: 200, padding: 24,
+  },
+  modalBox: {
+    backgroundColor: 'var(--surface)', border: '1px solid var(--amber)',
+    borderRadius: 14, padding: '28px 32px', maxWidth: 640, width: '100%',
+    maxHeight: '80vh', overflowY: 'auto',
+    boxShadow: '0 16px 48px rgba(0,0,0,0.6)',
+  },
+  modalHeader: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 },
+  modalDate: { fontSize: '0.8rem', fontFamily: "'JetBrains Mono', monospace", color: 'var(--amber)', flex: 1 },
+  modalMood: { display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem' },
+  modalTime: { fontSize: '0.65rem', fontFamily: "'JetBrains Mono', monospace", color: 'var(--muted)', marginBottom: 20 },
+  modalBody: { fontSize: '1rem', color: 'var(--text)', lineHeight: 1.8, whiteSpace: 'pre-wrap' },
+
+  // Error / misc
+  errorBox: { padding: '32px', backgroundColor: 'var(--surface)', border: '1px solid var(--red)', borderRadius: 10 },
+  errorTitle: { fontWeight: 700, color: 'var(--red)', marginBottom: 6, fontSize: '0.9rem' },
+  errorMsg: { color: 'var(--muted)', fontFamily: "'JetBrains Mono', monospace", fontSize: '0.78rem', marginBottom: 16 },
+  retryBtn: { background: 'none', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: 6, padding: '6px 16px', cursor: 'pointer', fontFamily: 'inherit', fontSize: '0.78rem' },
 }
