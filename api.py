@@ -26,7 +26,7 @@ app.add_middleware(
         "http://localhost:5175",
         "http://localhost:5176",
         "http://localhost:4173",
-        "https://daykeepai.dominioneze.dev",
+        "https://daykeep.dominioneze.dev",
     ],
     allow_credentials=True,
     allow_methods=["*"],
