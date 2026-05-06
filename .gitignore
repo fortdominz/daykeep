@@ -2,3 +2,6 @@ daykeep.json
 __pycache__/
 *.pyc
 .DS_Store
+.env
+frontend/node_modules/
+frontend/dist/
