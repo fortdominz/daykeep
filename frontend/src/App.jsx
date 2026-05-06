@@ -1,13 +1,14 @@
-import { useState } from 'react'
-import { BrowserRouter, Routes, Route, NavLink, useLocation } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import Dashboard from './components/Dashboard'
 import Goals from './components/Goals'
 import Tasks from './components/Tasks'
 import Journal from './components/Journal'
 import Analytics from './components/Analytics'
+import ErrorBoundary from './components/ErrorBoundary'
 
 function Sidebar() {
   const location = useLocation()
+  const navigate = useNavigate()
 
   const navItems = [
     { to: '/',          label: 'Dashboard', icon: '⌂' },
@@ -16,6 +17,8 @@ function Sidebar() {
     { to: '/journal',   label: 'Journal',   icon: '▪' },
     { to: '/analytics', label: 'Analytics', icon: '~' },
   ]
+
+  const canGoBack = location.pathname !== '/'
 
   return (
     <aside style={styles.sidebar}>
@@ -27,6 +30,13 @@ function Sidebar() {
           <div style={styles.logoTagline}>keep your word</div>
         </div>
       </div>
+
+      {/* Back button — shown on any page that isn't the dashboard */}
+      {canGoBack && (
+        <button onClick={() => navigate(-1)} style={styles.backBtn}>
+          ← Back
+        </button>
+      )}
 
       {/* Nav */}
       <nav style={styles.nav}>
@@ -46,7 +56,7 @@ function Sidebar() {
 
       {/* Footer */}
       <div style={styles.sidebarFooter}>
-        <div style={styles.footerLabel}>daykeep.app</div>
+        <div style={styles.footerLabel}>DayKeep</div>
         <div style={styles.footerSub}>keep your day. keep your word.</div>
       </div>
     </aside>
@@ -69,11 +79,11 @@ export default function App() {
     <BrowserRouter>
       <Layout>
         <Routes>
-          <Route path="/"          element={<Dashboard />} />
-          <Route path="/tasks"     element={<Tasks />} />
-          <Route path="/goals"     element={<Goals />} />
-          <Route path="/journal"   element={<Journal />} />
-          <Route path="/analytics" element={<Analytics />} />
+          <Route path="/"          element={<ErrorBoundary><Dashboard /></ErrorBoundary>} />
+          <Route path="/tasks"     element={<ErrorBoundary><Tasks /></ErrorBoundary>} />
+          <Route path="/goals"     element={<ErrorBoundary><Goals /></ErrorBoundary>} />
+          <Route path="/journal"   element={<ErrorBoundary><Journal /></ErrorBoundary>} />
+          <Route path="/analytics" element={<ErrorBoundary><Analytics /></ErrorBoundary>} />
         </Routes>
       </Layout>
     </BrowserRouter>
@@ -103,9 +113,9 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     gap: 12,
-    padding: '0 20px 28px',
+    padding: '0 20px 20px',
     borderBottom: '1px solid var(--border)',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   logoMark: {
     width: 36,
@@ -132,6 +142,22 @@ const styles = {
     color: 'var(--muted)',
     fontFamily: "'JetBrains Mono', monospace",
     letterSpacing: '0.04em',
+  },
+  backBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    margin: '0 10px 8px',
+    padding: '7px 12px',
+    backgroundColor: 'transparent',
+    border: '1px solid var(--border)',
+    borderRadius: 6,
+    color: 'var(--muted)',
+    fontSize: '0.78rem',
+    fontFamily: "'JetBrains Mono', monospace",
+    cursor: 'pointer',
+    transition: 'color 0.15s, border-color 0.15s',
+    width: 'calc(100% - 20px)',
   },
   nav: {
     display: 'flex',
