@@ -11,12 +11,17 @@ const MOOD_COLORS = {
 }
 
 function getMoodColor(mood) {
-  return MOOD_COLORS[mood] || 'var(--muted)'
+  // mood may come back as string "1"-"5" or integer 1-5
+  return MOOD_COLORS[Number(mood)] || 'var(--muted)'
+}
+
+function getMoodLabel(mood) {
+  return MOOD_LABELS[Number(mood)] || ''
 }
 
 function getEntryText(entry) {
-  // Guard against old CLI data that might use different field names
-  return entry?.text || entry?.content || entry?.entry || ''
+  // models.py stores as "content"; frontend sends as "text"
+  return entry?.content || entry?.text || entry?.entry || ''
 }
 
 export default function Journal() {
@@ -48,7 +53,7 @@ export default function Journal() {
 
   function openWrite() {
     if (todaysEntry) {
-      setForm({ text: getEntryText(todaysEntry), mood: todaysEntry.mood || 3 })
+      setForm({ text: getEntryText(todaysEntry), mood: Number(todaysEntry.mood) || 3 })
       setSelected(todaysEntry)
     } else {
       setForm({ text: '', mood: 3 })
@@ -122,7 +127,7 @@ export default function Journal() {
           <div style={s.todayMood}>
             <span style={{ ...s.moodDot, backgroundColor: getMoodColor(todaysEntry.mood) }} />
             <span style={{ color: getMoodColor(todaysEntry.mood), fontWeight: 600 }}>
-              {MOOD_LABELS[todaysEntry.mood] || 'No mood'}
+              {getMoodLabel(todaysEntry.mood) || 'No mood'}
             </span>
           </div>
           <p style={s.todayPreview}>
@@ -224,7 +229,7 @@ export default function Journal() {
             <div style={s.readMood}>
               <span style={{ ...s.moodDot, backgroundColor: getMoodColor(selected.mood) }} />
               <span style={{ color: getMoodColor(selected.mood), fontSize: '0.75rem' }}>
-                {MOOD_LABELS[selected.mood] || ''}
+                {getMoodLabel(selected.mood) || ''}
               </span>
             </div>
             <button onClick={() => setSelected(null)} style={s.closeBtn}>✕</button>
@@ -262,7 +267,7 @@ function EntryCard({ entry, isToday, selected, onSelect, onDelete }) {
           <>
             <span style={{ ...s.moodDot, backgroundColor: color, width: 7, height: 7 }} />
             <span style={{ fontSize: '0.68rem', color, fontFamily: "'JetBrains Mono', monospace" }}>
-              {MOOD_LABELS[mood]}
+              {getMoodLabel(mood)}
             </span>
           </>
         )}

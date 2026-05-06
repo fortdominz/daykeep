@@ -8,22 +8,26 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional
 import io
 import csv
 import datetime
 
-# Import the existing data layer directly
 import db
-from models import (
-    create_goal, create_task, create_journal_entry, create_user_profile, today
-)
+from models import today, now, check_date_format
 
 app = FastAPI(title="DayKeep API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:4173", "https://daykeepai.dominioneze.dev"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://localhost:5175",
+        "http://localhost:5176",
+        "http://localhost:4173",
+        "https://daykeepai.dominioneze.dev",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -41,7 +45,6 @@ def health():
 
 class UserProfile(BaseModel):
     name: str
-    timezone: Optional[str] = ""
 
 @app.get("/api/user")
 def get_user():
@@ -49,10 +52,12 @@ def get_user():
 
 @app.put("/api/user")
 def save_user(profile: UserProfile):
-    from models import create_user_profile
-    user, error = create_user_profile(name=profile.name)
-    if error:
-        raise HTTPException(status_code=400, detail=error)
+    if not profile.name.strip():
+        raise HTTPException(status_code=400, detail="Name is required.")
+    user = {
+        "name": profile.name.strip(),
+        "date_created": now(),
+    }
     db.save_user(user)
     return user
 
@@ -61,7 +66,6 @@ def save_user(profile: UserProfile):
 
 @app.get("/api/dashboard")
 def get_dashboard():
-    """Single call for the home screen — today's summary, upcoming, overdue, endangered streaks."""
     db.check_and_flag_stale_tasks()
     db.auto_generate_routine_tasks()
     summary = db.get_todays_summary()
@@ -116,18 +120,25 @@ def get_goal(goal_id: int):
 
 @app.post("/api/goals", status_code=201)
 def create_goal_endpoint(body: GoalCreate):
-    goal, error = create_goal(
-        title=body.title,
-        description=body.description,
-        category=body.category,
-        subcategory=body.subcategory,
-        target_date=body.target_date,
-        status=body.status,
-        is_routine=body.is_routine,
-        routine_time=body.routine_time,
-    )
-    if error:
-        raise HTTPException(status_code=400, detail=error)
+    if not body.title.strip():
+        raise HTTPException(status_code=400, detail="Title is required.")
+    if body.target_date and not check_date_format(body.target_date):
+        raise HTTPException(status_code=400, detail="Target date must be YYYY-MM-DD.")
+    goal = {
+        "id": None,
+        "title": body.title.strip(),
+        "description": (body.description or "").strip(),
+        "category": (body.category or "").strip(),
+        "subcategory": (body.subcategory or "").strip(),
+        "target_date": (body.target_date or "").strip(),
+        "status": body.status or "Active",
+        "is_routine": body.is_routine or False,
+        "routine_time": (body.routine_time or "").strip(),
+        "streak": 0,
+        "last_streak_date": "",
+        "date_created": now(),
+        "last_updated": now(),
+    }
     return db.add_goal(goal)
 
 @app.put("/api/goals/{goal_id}")
@@ -148,9 +159,11 @@ def delete_goal(goal_id: int):
 
 # ─── TASKS ────────────────────────────────────────────────────────────────────
 
+VALID_STATUSES = ["Planned", "Complete", "Incomplete", "Skipped", "Postponed", "Abandoned: needs update"]
+
 class TaskCreate(BaseModel):
     title: str
-    date: Optional[str] = None          # defaults to today
+    date: Optional[str] = None
     category: Optional[str] = ""
     subcategory: Optional[str] = ""
     goal_id: Optional[int] = None
@@ -210,20 +223,28 @@ def get_task(task_id: int):
 
 @app.post("/api/tasks", status_code=201)
 def create_task_endpoint(body: TaskCreate):
+    if not body.title.strip():
+        raise HTTPException(status_code=400, detail="Title is required.")
     task_date = body.date or today()
-    task, error = create_task(
-        title=body.title,
-        date=task_date,
-        status=body.status,
-        category=body.category,
-        subcategory=body.subcategory,
-        goal_id=body.goal_id,
-        scheduled_time=body.scheduled_time,
-        is_routine=body.is_routine,
-        notes=[],
-    )
-    if error:
-        raise HTTPException(status_code=400, detail=error)
+    if not check_date_format(task_date):
+        raise HTTPException(status_code=400, detail="Date must be YYYY-MM-DD.")
+    task = {
+        "id": None,
+        "title": body.title.strip(),
+        "date": task_date,
+        "category": (body.category or "").strip(),
+        "subcategory": (body.subcategory or "").strip(),
+        "goal_id": body.goal_id,
+        "scheduled_time": (body.scheduled_time or "").strip(),
+        "is_routine": body.is_routine or False,
+        "status": body.status or "Planned",
+        "time_spent": "",
+        "notes": [],
+        "postpone_history": [],
+        "date_completed": "",
+        "date_created": now(),
+        "last_updated": now(),
+    }
     return db.add_task(task)
 
 @app.put("/api/tasks/{task_id}")
@@ -234,13 +255,11 @@ def update_task(task_id: int, body: TaskUpdate):
 
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
 
-    # Auto-set date_completed when marking complete
-    if updates.get("status") == "Complete" and not updates.get("date_completed"):
-        updates["date_completed"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if updates.get("status") == "Complete" and not task.get("date_completed"):
+        updates["date_completed"] = now()
 
     db.update_task(task_id, updates)
 
-    # If task is linked to a routine goal, update the streak
     updated_task = db.get_task_by_id(task_id)
     if updates.get("status") == "Complete" and updated_task.get("goal_id") and updated_task.get("is_routine"):
         db.update_goal_streak(updated_task["goal_id"])
@@ -273,12 +292,13 @@ def postpone_task(task_id: int, body: PostponeBody):
 
 
 # ─── JOURNAL ──────────────────────────────────────────────────────────────────
+# NOTE: The models.py function stores journal text as "content" (not "text").
+# Mood is stored as a string "1"–"5" to match MOOD_LABELS keys in models.py.
 
 class JournalCreate(BaseModel):
-    text: str
-    mood: Optional[int] = None          # 1-5
-    season: Optional[str] = ""
-    date: Optional[str] = None          # defaults to today
+    text: str           # frontend sends "text"; we store as "content"
+    mood: Optional[int] = None
+    date: Optional[str] = None
 
 class JournalUpdate(BaseModel):
     text: Optional[str] = None
@@ -292,7 +312,7 @@ def get_journal():
 @app.get("/api/journal/today")
 def get_todays_journal():
     entry = db.get_todays_journal_entry()
-    return entry or {}
+    return entry if entry else {}
 
 @app.get("/api/journal/{entry_id}")
 def get_journal_entry(entry_id: int):
@@ -305,19 +325,28 @@ def get_journal_entry(entry_id: int):
 def create_journal_endpoint(body: JournalCreate):
     entry_date = body.date or today()
 
-    # Don't allow duplicate entries for the same date
+    if not check_date_format(entry_date):
+        raise HTTPException(status_code=400, detail="Date must be YYYY-MM-DD.")
+
     existing = db.get_journal_entry_by_date(entry_date)
     if existing:
-        raise HTTPException(status_code=409, detail="Entry for this date already exists. Use PUT to update it.")
+        raise HTTPException(status_code=409, detail="Entry for this date already exists.")
 
-    entry, error = create_journal_entry(
-        text=body.text,
-        mood=body.mood,
-        season=body.season,
-        date=entry_date,
-    )
-    if error:
-        raise HTTPException(status_code=400, detail=error)
+    if not body.text.strip():
+        raise HTTPException(status_code=400, detail="Entry cannot be empty.")
+
+    # mood stored as string to match MOOD_LABELS keys ("1"–"5")
+    mood_str = str(body.mood) if body.mood else ""
+
+    entry = {
+        "id": None,
+        "date": entry_date,
+        "content": body.text.strip(),   # stored as "content" per models.py
+        "mood": mood_str,
+        "date_created": now(),
+        "last_updated": now(),
+        "update_history": [],
+    }
     return db.add_journal_entry(entry)
 
 @app.put("/api/journal/{entry_id}")
@@ -325,8 +354,16 @@ def update_journal_entry(entry_id: int, body: JournalUpdate):
     entry = db.get_journal_entry_by_id(entry_id)
     if not entry:
         raise HTTPException(status_code=404, detail="Entry not found")
-    updates = {k: v for k, v in body.model_dump().items() if v is not None}
-    db.update_journal_entry(entry_id, updates)
+
+    updates = {}
+    if body.text is not None:
+        updates["content"] = body.text.strip()   # update "content", not "text"
+    if body.mood is not None:
+        updates["mood"] = str(body.mood)         # store as string
+
+    if updates:
+        db.update_journal_entry(entry_id, updates)
+
     return db.get_journal_entry_by_id(entry_id)
 
 @app.delete("/api/journal/{entry_id}")
@@ -358,7 +395,6 @@ def export_tasks():
     writer.writeheader()
     for task in tasks:
         writer.writerow({field: task.get(field, "") for field in fields})
-
     return StreamingResponse(
         iter([output.getvalue()]),
         media_type="text/csv",
@@ -378,7 +414,6 @@ def export_goals():
     writer.writeheader()
     for goal in goals:
         writer.writerow({field: goal.get(field, "") for field in fields})
-
     return StreamingResponse(
         iter([output.getvalue()]),
         media_type="text/csv",
