@@ -1,4 +1,6 @@
-const BASE = '/api'
+// In dev: Vite proxy forwards /api → localhost:8080
+// In production: VITE_API_URL must be set to the Railway backend URL (no trailing slash)
+const BASE = (import.meta.env.VITE_API_URL || '') + '/api'
 
 async function req(method, path, body) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } }
