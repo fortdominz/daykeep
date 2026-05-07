@@ -14,7 +14,7 @@ function Sidebar() {
     { to: '/',          label: 'Dashboard', icon: '⌂' },
     { to: '/tasks',     label: 'Tasks',     icon: '✓' },
     { to: '/goals',     label: 'Goals',     icon: '◎' },
-    { to: '/journal',   label: 'Journal',   icon: '▪' },
+    { to: '/journal',   label: 'Journal',   icon: '🖌' },
     { to: '/analytics', label: 'Analytics', icon: '~' },
   ]
 
